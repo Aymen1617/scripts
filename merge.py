@@ -134,70 +134,52 @@
 
 
 
-# snapshot_retry_dag.py
+# 
+
+
+
 import logging
 from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from utils.strapi_helper import strapi_get, get_client
-from utils.incremental_snapshot import run_snapshot  # your Python version
-from utils.generate_snapshot_query import generate_snapshot_query
-from utils.generate_non_incremental_snapshot_query import generate_non_incremental_snapshot_query
+from utils.strapi_helper import get_client, strapi_get
 
 # -----------------------------
-# Snapshot Execution Helpers
+# Snapshot Helpers (all in one file)
 # -----------------------------
-def run_incremental_snapshot(snapshot):
-    client = get_client()
-    if snapshot["snapshotStatus"] == "done":
-        logging.info(f"[Snapshot {snapshot['id']}] Incremental snapshot already done, skipping.")
-        return
+def generate_snapshot_query(strapi_client, snapshot):
+    """
+    Equivalent to generateSnapshotQuery in Node.js
+    Placeholder: replace with actual query logic
+    """
+    logging.info(f"[Snapshot {snapshot['id']}] Generating incremental snapshot query...")
+    return f"SELECT * FROM {snapshot['tableName']} WHERE updated_at > last_run_time()"
 
-    try:
-        # Generate query using existing function
-        query = generate_snapshot_query(snapshot)
+def run_snapshot(strapi_client, snapshot_id):
+    """
+    Equivalent to runSnapshot in Node.js
+    Placeholder: replace with actual snapshot execution logic
+    """
+    logging.info(f"[Snapshot {snapshot_id}] Executing incremental snapshot (Python placeholder)")
 
-        # Update Strapi snapshot status to processing
-        client.update_entry("snapshot", snapshot["id"], {"query": query, "snapshotStatus": "processing"})
+def generate_non_incremental_snapshot_query(strapi_client, snapshot):
+    """
+    Equivalent to generateNonIncrementalSnapshotQuery in Node.js
+    Placeholder: returns query and connectors
+    """
+    logging.info(f"[Snapshot {snapshot['id']}] Generating non-incremental snapshot query...")
+    return {
+        "query": f"SELECT * FROM {snapshot['tableName']}",
+        "sourceConnector": snapshot.get("connector", {}).get("id"),
+        "sinkConnector": snapshot.get("connector", {}).get("id"),
+    }
 
-        # Run the snapshot
-        run_snapshot(snapshot_id=snapshot["id"])
-
-        # Mark as done
-        client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "done"})
-        logging.info(f"[Snapshot {snapshot['id']}] Incremental snapshot executed successfully.")
-    except Exception as e:
-        logging.error(f"[Snapshot {snapshot['id']}] Incremental snapshot failed: {e}")
-        client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "error"})
-
-
-def run_non_incremental_snapshot(snapshot):
-    client = get_client()
-    try:
-        # Generate query using existing function
-        result = generate_non_incremental_snapshot_query(snapshot)
-
-        # Update Strapi snapshot with result
-        client.update_entry(
-            "snapshot",
-            snapshot["id"],
-            {
-                "query": result["query"],
-                "sourceSnapshotConnector": result["sourceConnector"],
-                "sinkSnapshotConnector": result["sinkConnector"],
-                "snapshotStatus": "done",
-                "endAt": datetime.utcnow().isoformat(),
-            },
-        )
-        logging.info(f"[Snapshot {snapshot['id']}] Non-incremental snapshot executed successfully.")
-    except Exception as e:
-        logging.error(f"[Snapshot {snapshot['id']}] Non-incremental snapshot failed: {e}")
-        client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "error"})
-
-
+# -----------------------------
+# Snapshot Retry Logic
+# -----------------------------
 def snapshot_retry_job():
-    """Main function to fetch pending snapshots and execute them."""
-    logging.info("[Snapshot Retry] Checking for active snapshots...")
+    logging.info("[Cron][Snapshot Retry] Checking for active snapshots...")
+    strapi_client = get_client()
     now = datetime.utcnow()
 
     pending_snapshots = strapi_get(
@@ -215,18 +197,17 @@ def snapshot_retry_job():
     )
 
     if not pending_snapshots:
-        logging.info("[Snapshot Retry] No active snapshots found.")
+        logging.info("[Cron][Snapshot Retry] No active snapshots found.")
         return
 
-    # Filter snapshots that are scheduled to run now
     ready_snapshots = [
         s for s in pending_snapshots
         if not s.get("scheduledAt") or datetime.fromisoformat(s["scheduledAt"]) <= now
     ]
-    logging.info(f"[Snapshot Retry] Found {len(ready_snapshots)} active snapshots ready to execute.")
+    logging.info(f"[Cron][Snapshot Retry] Found {len(ready_snapshots)} snapshots ready to execute.")
 
     for snapshot in ready_snapshots:
-        # Check for conflicts on the same table
+        # Check conflicts
         same_table_snapshots = strapi_get(
             "snapshot",
             filters={
@@ -237,19 +218,44 @@ def snapshot_retry_job():
             },
         )
         if same_table_snapshots:
-            logging.warning(
-                f"[Snapshot {snapshot['id']}] Skipping — another snapshot for table '{snapshot['tableName']}' is processing."
-            )
+            logging.warning(f"[Snapshot {snapshot['id']}] Skipping due to conflict on table {snapshot['tableName']}")
             continue
 
-        # Execute snapshot based on type
+        # Run incremental or non-incremental
         if snapshot["type"] == "Incremental":
-            run_incremental_snapshot(snapshot)
+            try:
+                if snapshot.get("snapshotStatus") == "done":
+                    logging.info(f"[Snapshot {snapshot['id']}] Already done, skipping.")
+                    continue
+                query = generate_snapshot_query(strapi_client, snapshot)
+                strapi_client.update_entry("snapshot", snapshot["id"], {"query": query, "snapshotStatus": "processing"})
+                run_snapshot(strapi_client, snapshot["id"])
+                strapi_client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "done"})
+                logging.info(f"[Snapshot {snapshot['id']}] Incremental snapshot completed successfully.")
+            except Exception as e:
+                logging.error(f"[Snapshot {snapshot['id']}] Incremental execution failed: {e}")
+                strapi_client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "error"})
+
         elif snapshot["type"] == "Non-Incremental":
-            run_non_incremental_snapshot(snapshot)
+            try:
+                result = generate_non_incremental_snapshot_query(strapi_client, snapshot)
+                strapi_client.update_entry(
+                    "snapshot",
+                    snapshot["id"],
+                    {
+                        "query": result["query"],
+                        "sourceSnapshotConnector": result["sourceConnector"],
+                        "sinkSnapshotConnector": result["sinkConnector"],
+                        "snapshotStatus": "done",
+                        "endAt": datetime.utcnow().isoformat(),
+                    },
+                )
+                logging.info(f"[Snapshot {snapshot['id']}] Non-incremental snapshot completed successfully.")
+            except Exception as e:
+                logging.error(f"[Snapshot {snapshot['id']}] Non-incremental execution failed: {e}")
+                strapi_client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "error"})
         else:
             logging.warning(f"[Snapshot {snapshot['id']}] Unknown snapshot type: {snapshot['type']}")
-
 
 # -----------------------------
 # Airflow DAG
@@ -266,7 +272,7 @@ DEFAULT_ARGS = {
 with DAG(
     dag_id="snapshot_retry_dag",
     default_args=DEFAULT_ARGS,
-    description="Retry snapshots from Strapi using existing Strapi client",
+    description="Retry snapshots from Strapi (Python single file)",
     schedule="@hourly",
     start_date=datetime(2026, 1, 5),
     catchup=False,
