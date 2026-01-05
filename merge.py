@@ -263,7 +263,7 @@ with DAG(
     dag_id="snapshot_retry_dag",
     default_args=DEFAULT_ARGS,
     description="Retry snapshots from Strapi",
-    schedule="@hourly",  # adjust as needed
+    schedule="49 15 * * *",  # adjust as needed
     start_date=datetime(2026, 1, 5),
     catchup=False,
     max_active_runs=1,
@@ -276,3 +276,4 @@ with DAG(
     )
 
     run_snapshots_task
+
