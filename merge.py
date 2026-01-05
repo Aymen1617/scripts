@@ -136,52 +136,68 @@
 
 # 
 
-
-
-import logging
 from datetime import datetime, timedelta
+import logging
+
 from airflow import DAG
 from airflow.operators.python import PythonOperator
-from utils.strapi_helper import get_client, strapi_get
+
+# Mock functions for Strapi API interactions (replace with your actual client code)
+from utils.strapi_helper import strapi_get, strapi_update, run_snapshot
 
 # -----------------------------
-# Snapshot Helpers (all in one file)
+# Snapshot Execution Functions
 # -----------------------------
-def generate_snapshot_query(strapi_client, snapshot):
-    """
-    Equivalent to generateSnapshotQuery in Node.js
-    Placeholder: replace with actual query logic
-    """
-    logging.info(f"[Snapshot {snapshot['id']}] Generating incremental snapshot query...")
-    return f"SELECT * FROM {snapshot['tableName']} WHERE updated_at > last_run_time()"
+def run_incremental_snapshot(snapshot):
+    """Run incremental snapshot."""
+    snapshot_id = snapshot["id"]
+    table_name = snapshot["tableName"]
 
-def run_snapshot(strapi_client, snapshot_id):
-    """
-    Equivalent to runSnapshot in Node.js
-    Placeholder: replace with actual snapshot execution logic
-    """
-    logging.info(f"[Snapshot {snapshot_id}] Executing incremental snapshot (Python placeholder)")
+    if snapshot.get("snapshotStatus") == "done":
+        logging.info(f"[Snapshot {snapshot_id}] Already done, skipping")
+        return
 
-def generate_non_incremental_snapshot_query(strapi_client, snapshot):
-    """
-    Equivalent to generateNonIncrementalSnapshotQuery in Node.js
-    Placeholder: returns query and connectors
-    """
-    logging.info(f"[Snapshot {snapshot['id']}] Generating non-incremental snapshot query...")
-    return {
-        "query": f"SELECT * FROM {snapshot['tableName']}",
-        "sourceConnector": snapshot.get("connector", {}).get("id"),
-        "sinkConnector": snapshot.get("connector", {}).get("id"),
-    }
+    try:
+        # Placeholder: generate query for incremental snapshot
+        query = f"SELECT * FROM {table_name} WHERE updated_at > last_run_time()"
+        strapi_update("snapshot", snapshot_id, {"query": query, "snapshotStatus": "processing"})
 
-# -----------------------------
-# Snapshot Retry Logic
-# -----------------------------
+        # Placeholder: run the snapshot
+        run_snapshot(snapshot_id)
+        strapi_update("snapshot", snapshot_id, {"snapshotStatus": "done"})
+        logging.info(f"[Snapshot {snapshot_id}] Incremental snapshot completed successfully")
+    except Exception as e:
+        logging.error(f"[Snapshot {snapshot_id}] Incremental snapshot failed: {e}")
+        strapi_update("snapshot", snapshot_id, {"snapshotStatus": "error"})
+
+
+def run_non_incremental_snapshot(snapshot):
+    """Run non-incremental snapshot."""
+    snapshot_id = snapshot["id"]
+    table_name = snapshot["tableName"]
+    try:
+        query = f"SELECT * FROM {table_name}"  # Placeholder
+        strapi_update(
+            "snapshot",
+            snapshot_id,
+            {
+                "query": query,
+                "snapshotStatus": "done",
+                "endAt": datetime.utcnow().isoformat(),
+            },
+        )
+        logging.info(f"[Snapshot {snapshot_id}] Non-incremental snapshot completed successfully")
+    except Exception as e:
+        logging.error(f"[Snapshot {snapshot_id}] Non-incremental snapshot failed: {e}")
+        strapi_update("snapshot", snapshot_id, {"snapshotStatus": "error"})
+
+
 def snapshot_retry_job():
-    logging.info("[Cron][Snapshot Retry] Checking for active snapshots...")
-    strapi_client = get_client()
+    """Check Strapi for active snapshots and execute them."""
+    logging.info("[Snapshot Retry] Checking for active snapshots...")
     now = datetime.utcnow()
 
+    # Fetch pending snapshots
     pending_snapshots = strapi_get(
         "snapshot",
         filters={"isActive": True, "snapshotStatus": "pending"},
@@ -197,18 +213,19 @@ def snapshot_retry_job():
     )
 
     if not pending_snapshots:
-        logging.info("[Cron][Snapshot Retry] No active snapshots found.")
+        logging.info("[Snapshot Retry] No active snapshots found.")
         return
 
+    # Filter snapshots that are ready to run now
     ready_snapshots = [
         s for s in pending_snapshots
         if not s.get("scheduledAt") or datetime.fromisoformat(s["scheduledAt"]) <= now
     ]
-    logging.info(f"[Cron][Snapshot Retry] Found {len(ready_snapshots)} snapshots ready to execute.")
+    logging.info(f"[Snapshot Retry] Found {len(ready_snapshots)} snapshots ready to execute")
 
     for snapshot in ready_snapshots:
-        # Check conflicts
-        same_table_snapshots = strapi_get(
+        # Check for conflicts: same table already processing
+        same_table = strapi_get(
             "snapshot",
             filters={
                 "id": {"$ne": snapshot["id"]},
@@ -217,48 +234,21 @@ def snapshot_retry_job():
                 "isActive": True,
             },
         )
-        if same_table_snapshots:
+        if same_table:
             logging.warning(f"[Snapshot {snapshot['id']}] Skipping due to conflict on table {snapshot['tableName']}")
             continue
 
-        # Run incremental or non-incremental
+        # Execute snapshot based on type
         if snapshot["type"] == "Incremental":
-            try:
-                if snapshot.get("snapshotStatus") == "done":
-                    logging.info(f"[Snapshot {snapshot['id']}] Already done, skipping.")
-                    continue
-                query = generate_snapshot_query(strapi_client, snapshot)
-                strapi_client.update_entry("snapshot", snapshot["id"], {"query": query, "snapshotStatus": "processing"})
-                run_snapshot(strapi_client, snapshot["id"])
-                strapi_client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "done"})
-                logging.info(f"[Snapshot {snapshot['id']}] Incremental snapshot completed successfully.")
-            except Exception as e:
-                logging.error(f"[Snapshot {snapshot['id']}] Incremental execution failed: {e}")
-                strapi_client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "error"})
-
+            run_incremental_snapshot(snapshot)
         elif snapshot["type"] == "Non-Incremental":
-            try:
-                result = generate_non_incremental_snapshot_query(strapi_client, snapshot)
-                strapi_client.update_entry(
-                    "snapshot",
-                    snapshot["id"],
-                    {
-                        "query": result["query"],
-                        "sourceSnapshotConnector": result["sourceConnector"],
-                        "sinkSnapshotConnector": result["sinkConnector"],
-                        "snapshotStatus": "done",
-                        "endAt": datetime.utcnow().isoformat(),
-                    },
-                )
-                logging.info(f"[Snapshot {snapshot['id']}] Non-incremental snapshot completed successfully.")
-            except Exception as e:
-                logging.error(f"[Snapshot {snapshot['id']}] Non-incremental execution failed: {e}")
-                strapi_client.update_entry("snapshot", snapshot["id"], {"snapshotStatus": "error"})
+            run_non_incremental_snapshot(snapshot)
         else:
             logging.warning(f"[Snapshot {snapshot['id']}] Unknown snapshot type: {snapshot['type']}")
 
+
 # -----------------------------
-# Airflow DAG
+# Airflow DAG Definition
 # -----------------------------
 DEFAULT_ARGS = {
     "owner": "airflow",
@@ -272,15 +262,17 @@ DEFAULT_ARGS = {
 with DAG(
     dag_id="snapshot_retry_dag",
     default_args=DEFAULT_ARGS,
-    description="Retry snapshots from Strapi (Python single file)",
-    schedule="@hourly",
+    description="Retry snapshots from Strapi",
+    schedule="@hourly",  # adjust as needed
     start_date=datetime(2026, 1, 5),
     catchup=False,
     max_active_runs=1,
     tags=["snapshot", "strapi"],
 ) as dag:
 
-    run_snapshots = PythonOperator(
+    run_snapshots_task = PythonOperator(
         task_id="run_snapshot_retry",
         python_callable=snapshot_retry_job,
     )
+
+    run_snapshots_task
