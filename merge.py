@@ -249,7 +249,7 @@ with DAG(
     dag_id="snapshot_retry_dag",
     default_args=DEFAULT_ARGS,
     description="Retry snapshots from Strapi using existing Strapi client",
-    schedule_interval="@hourly",
+    schedule="@hourly",
     start_date=datetime(2026, 1, 5),
     catchup=False,
     max_active_runs=1,
@@ -262,3 +262,4 @@ with DAG(
     )
 
     run_snapshots
+
