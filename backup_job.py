@@ -26,7 +26,7 @@ RETENTION_DAYS = 30
 # LOGGING
 # -----------------------------
 logging.basicConfig(
-    level=logging.INFO,
+    level=print,
     format="[%(asctime)s] %(levelname)s - %(message)s"
 )
 
@@ -39,15 +39,15 @@ def ensure_dir(path):
 
 
 def backup_mysql():
-    logging.info("Starting MySQL backup")
+    print("Starting MySQL backup")
 
     today = datetime.now().strftime("%Y-%m-%d")
-    logging.info(f"Today's date: {today}")
+    print(f"Today's date: {today}")
     backup_path = os.path.join(BACKUP_DIR, today)
     ensure_dir(backup_path)
 
     sql_file = os.path.join(backup_path, "backup.sql")
-    logging.info(f"SQL backup file path: {sql_file}")
+    print(f"SQL backup file path: {sql_file}")
 
     cmd = [
         "mysqldump",
@@ -57,15 +57,15 @@ def backup_mysql():
         f"-p{DB_PASSWORD}",
         DB_NAME
     ]
-    logging.info(f"Running command: {' '.join(cmd)}")
+    print(f"Running command: {' '.join(cmd)}")
     with open(sql_file, "w") as f:
         subprocess.run(cmd, stdout=f, check=True)
 
-    logging.info(f"MySQL backup created at {sql_file}")
+    print(f"MySQL backup created at {sql_file}")
 
 
 def zip_uploads():
-    logging.info("Starting uploads backup")
+    print("Starting uploads backup")
 
     today = datetime.now().strftime("%Y-%m-%d")
     backup_path = os.path.join(BACKUP_DIR, today)
@@ -80,11 +80,11 @@ def zip_uploads():
                 arcname = os.path.relpath(full_path, UPLOADS_DIR)
                 zipf.write(full_path, arcname)
 
-    logging.info(f"Uploads zipped at {zip_path}")
+    print(f"Uploads zipped at {zip_path}")
 
 
 def cleanup_old_backups():
-    logging.info("Cleaning old backups")
+    print("Cleaning old backups")
 
     now = datetime.now()
     if not os.path.exists(BACKUP_DIR):
@@ -105,18 +105,18 @@ def cleanup_old_backups():
         age = (now - folder_date).days
         if age > RETENTION_DAYS:
             shutil.rmtree(folder_path)
-            logging.info(f"Deleted old backup folder: {folder_path}")
+            print(f"Deleted old backup folder: {folder_path}")
 
 
 # -----------------------------
 # ENTRY POINT
 # -----------------------------
 if __name__ == "__main__":
-    logging.info("Backup job started")
+    print("Backup job started")
     try:
         backup_mysql()
         zip_uploads()
         cleanup_old_backups()
-        logging.info("Backup job finished successfully")
+        print("Backup job finished successfully")
     except Exception as e:
         logging.error(f"Backup job failed: {e}", exc_info=True)
