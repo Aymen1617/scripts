@@ -83,7 +83,7 @@ def pause_sink_connector(snapshot_id, sink_db_id, table_name):
         json={"data": {"state": "Paused"}}
     ).raise_for_status()
 
-    logging.info(f"[Snapshot {snapshot_id}] Sink connector paused")
+    print(f"[Snapshot {snapshot_id}] Sink connector paused")
 
 
 # ==========================
@@ -116,12 +116,12 @@ def create_snapshot_connector(snapshot_id, base_connector, config, db_attrs, db_
 # ==========================
 
 def run_pipeline():
-    logging.info("Starting snapshot pipeline")
+    print("Starting snapshot pipeline")
 
     snapshots = fetch_pending_snapshots()
     if not snapshots:
         print("no snapshots found here!")
-        logging.info("No pending snapshots")
+        print("No pending snapshots")
         return
 
     start_times = {}
@@ -137,7 +137,7 @@ def run_pipeline():
         attrs = s["attributes"]
         table = attrs["tableName"]
 
-        logging.info(f"[Snapshot {snapshot_id}] Processing")
+        print(f"[Snapshot {snapshot_id}] Processing")
 
         if attrs.get("type") == "Incremental":
             query = generate_incremental_query(attrs)
@@ -183,7 +183,7 @@ def run_pipeline():
             datetime.utcnow().isoformat() + "Z"
         )
 
-    logging.info("Snapshot pipeline finished successfully")
+    print("Snapshot pipeline finished successfully")
 
 
 # ==========================
@@ -192,7 +192,7 @@ def run_pipeline():
 
 if __name__ == "__main__":
     logging.basicConfig(
-        level=logging.INFO,
+        level=print,
         format="[%(asctime)s] %(levelname)s - %(message)s"
     )
     run_pipeline()
