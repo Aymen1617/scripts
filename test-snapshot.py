@@ -120,6 +120,7 @@ def run_pipeline():
 
     snapshots = fetch_pending_snapshots()
     if not snapshots:
+        print("no snapshots found here!")
         logging.info("No pending snapshots")
         return
 
