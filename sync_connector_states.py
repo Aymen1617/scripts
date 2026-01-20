@@ -19,7 +19,7 @@ VALID_STATES = ["Unassigned", "Running", "Paused", "Failed"]
 # LOGGING
 # -----------------------------
 logging.basicConfig(
-    level=logging.INFO,
+    level=print,
     format="[%(asctime)s] %(levelname)s - %(message)s"
 )
 
@@ -42,20 +42,20 @@ def update_connector_state(connector_id, state):
     payload = {"data": {"state": state}}
     resp = requests.put(url, headers=HEADERS, json=payload)
     resp.raise_for_status()
-    logging.info(f"Updated connector {connector_id} → {state}")
+    print(f"Updated connector {connector_id} → {state}")
 
 
 # -----------------------------
 # MAIN LOGIC
 # -----------------------------
 def sync_connector_states():
-    logging.info("Starting connector state sync job")
+    print("Starting connector state sync job")
 
     connectors = fetch_connectors()
-    logging.info(f"Fetched {len(connectors)} connectors from Strapi")
+    print(f"Fetched {len(connectors)} connectors from Strapi")
 
     if not connectors:
-        logging.info("No connectors found")
+        print("No connectors found")
         return
 
     for connector in connectors:
@@ -64,7 +64,7 @@ def sync_connector_states():
         name = attrs.get("name")
         current_state = attrs.get("state")
 
-        logging.info(f"Processing connector: {name}")
+        print(f"Processing connector: {name}")
 
         # Skip Unassigned & SoftDelete
         if current_state in ["Unassigned", "SoftDelete"]:
@@ -98,7 +98,7 @@ def sync_connector_states():
                 kafka_state = "Unassigned"
 
             if kafka_state != current_state:
-                logging.info(f"{name}: {current_state} → {kafka_state}")
+                print(f"{name}: {current_state} → {kafka_state}")
                 update_connector_state(connector_id, kafka_state)
 
         except requests.exceptions.HTTPError as e:
@@ -111,13 +111,13 @@ def sync_connector_states():
         except Exception as e:
             logging.error(f"{name}: error {e}", exc_info=True)
 
-    logging.info("Connector state sync job finished")
+    print("Connector state sync job finished")
 
 
 # -----------------------------
 # ENTRY POINT
 # -----------------------------
 if __name__ == "__main__":
-    logging.info("Job started at %s", datetime.utcnow())
+    print("Job started at %s", datetime.utcnow())
     sync_connector_states()
-    logging.info("Job completed")
+    print("Job completed")
