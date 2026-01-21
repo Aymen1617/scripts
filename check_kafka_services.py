@@ -138,8 +138,12 @@ def run_all_checks():
     print("Starting schema registry checks...")
     check_table("schema_registries", "registry_status")
 
-    
+    print("Starting connect checks...")
+    check_table("connects", "connect_status")
 
+    print("Starting cluster REST API checks...")
+    check_clusters_via_rest_api()
+    
     print("All health checks completed!")
 
 # -----------------------
